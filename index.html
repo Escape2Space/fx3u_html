@@ -1,0 +1,1091 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>三菱 PLC (FX系列) X輸入監控 & Y輸出控制工作站</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        plc: {
+                            bg: '#0d1117',
+                            card: '#161b22',
+                            border: '#30363d',
+                            accent: '#10b981',
+                            warning: '#f59e0b',
+                            danger: '#ef4444',
+                            ledOn: '#00ff66',
+                            ledOff: '#334155'
+                        }
+                    },
+                    fontFamily: {
+                        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+                        sans: ['Inter', 'Microsoft JhengHei', 'sans-serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        .led-glow-green {
+            box-shadow: 0 0 10px #00ff66, 0 0 18px #00ff66;
+        }
+        .led-glow-amber {
+            box-shadow: 0 0 10px #f59e0b, 0 0 18px #f59e0b;
+        }
+        .led-glow-red {
+            box-shadow: 0 0 10px #ef4444, 0 0 15px #ef4444;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #0d1117;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #30363d;
+            border-radius: 3px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #484f58;
+        }
+    </style>
+</head>
+<body class="bg-plc-bg text-slate-100 font-sans min-h-screen flex flex-col">
+
+    <header class="bg-plc-card border-b border-plc-border sticky top-0 z-50 px-4 py-3 shadow-lg">
+        <div class="max-w-7xl mx-auto flex flex-wrap justify-between items-center gap-4">
+            <div class="flex items-center space-x-3">
+                <div class="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-emerald-400">
+                    <i class="fa-solid fa-microchip text-2xl"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-bold text-white flex items-center gap-2">
+                        三菱 PLC FX 系列 X/Y 雙向控制監控站
+                        <span class="text-xs font-normal px-2 py-0.5 rounded bg-emerald-900/60 text-emerald-300 border border-emerald-700">v3.0 Dual</span>
+                    </h1>
+                    <p class="text-xs text-slate-400">FX Programming Port RS-422 Protocol (X Read / Y Write)</p>
+                </div>
+            </div>
+
+            <!-- Connection Control Toolbar -->
+            <div class="flex flex-wrap items-center gap-3">
+                <div class="flex items-center bg-slate-900 rounded-lg p-1 border border-plc-border text-xs">
+                    <button id="modeSerialBtn" onclick="switchConnMode('serial')" class="px-3 py-1.5 rounded-md font-medium transition-all bg-emerald-600 text-white shadow">
+                        <i class="fa-solid fa-usb mr-1"></i> Web Serial
+                    </button>
+                    <button id="modeWsBtn" onclick="switchConnMode('websocket')" class="px-3 py-1.5 rounded-md font-medium transition-all text-slate-400 hover:text-slate-200">
+                        <i class="fa-solid fa-network-wired mr-1"></i> WebSocket
+                    </button>
+                    <button id="modeSimBtn" onclick="switchConnMode('sim')" class="px-3 py-1.5 rounded-md font-medium transition-all text-slate-400 hover:text-slate-200">
+                        <i class="fa-solid fa-vr-cardboard mr-1"></i> 虛擬模擬
+                    </button>
+                </div>
+
+                <button id="connectBtn" onclick="toggleConnection()" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg shadow-md transition-all flex items-center gap-2 text-sm">
+                    <i class="fa-solid fa-plug"></i> <span id="connectBtnText">連接 Serial 通訊埠</span>
+                </button>
+
+                <button id="reselectPortBtn" onclick="reselectSerialPort()" class="px-3 py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium rounded-lg border border-slate-700 text-xs transition-all flex items-center gap-1.5" title="重新選擇/變更 COM Port">
+                    <i class="fa-solid fa-arrows-rotate"></i> 換 Port
+                </button>
+
+                <div id="statusBadge" class="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 border border-slate-700 text-xs text-slate-400">
+                    <span id="statusLed" class="w-2.5 h-2.5 rounded-full bg-slate-500"></span>
+                    <span id="statusText">未連接</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Left Column: Controls and Input Displays (7 Cols on LG) -->
+        <div class="lg:col-span-7 flex flex-col gap-6">
+
+            <!-- Communication Settings Box -->
+            <div class="bg-plc-card border border-plc-border rounded-xl p-4 shadow-sm">
+                <div class="flex justify-between items-center mb-3 border-b border-slate-800 pb-2">
+                    <h2 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-sliders text-emerald-400"></i> 通訊與輪詢設定
+                    </h2>
+                    <span id="connModeDesc" class="text-xs text-emerald-400 font-mono">Mode: Web Serial (Direct COM Port)</span>
+                </div>
+
+                <!-- Serial Settings -->
+                <div id="serialConfigGroup" class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs mb-3">
+                    <div>
+                        <label class="block text-slate-400 mb-1">波特率 (Baud)</label>
+                        <select id="baudRate" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-slate-200 focus:border-emerald-500 outline-none">
+                            <option value="9600" selected>9600 (FX 預設)</option>
+                            <option value="19200">19200</option>
+                            <option value="38400">38400</option>
+                            <option value="115200">115200</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">資料位 (Data Bits)</label>
+                        <select id="dataBits" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-slate-200 outline-none">
+                            <option value="7" selected>7 bit (FX 預設)</option>
+                            <option value="8">8 bit</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">奇偶驗證 (Parity)</label>
+                        <select id="parity" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-slate-200 outline-none">
+                            <option value="even" selected>Even 偶校驗</option>
+                            <option value="odd">Odd 奇校驗</option>
+                            <option value="none">None 無</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-slate-400 mb-1">停止位 (Stop Bits)</label>
+                        <select id="stopBits" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-slate-200 outline-none">
+                            <option value="1" selected>1 bit</option>
+                            <option value="2">2 bit</option>
+                        </select>
+                    </div>
+                </div>
+
+                <!-- WebSocket Settings (Hidden by default) -->
+                <div id="wsConfigGroup" class="hidden grid-cols-1 sm:grid-cols-2 gap-3 text-xs mb-3">
+                    <div>
+                        <label class="block text-slate-400 mb-1">WebSocket 轉接伺服器 URL</label>
+                        <input type="text" id="wsUrl" value="ws://localhost:8080" placeholder="ws://192.168.1.100:8080" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-slate-200 focus:border-emerald-500 outline-none font-mono">
+                    </div>
+                    <div class="flex items-end">
+                        <span class="text-slate-400 text-[11px]">適用於 Serial-to-Ethernet (USR-TCP232 / MOXA) 轉接。</span>
+                    </div>
+                </div>
+
+                <!-- X-Polling Controls Bar -->
+                <div class="bg-slate-900/80 p-2.5 rounded-lg border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-rotate text-amber-400"></i>
+                        <span class="font-medium text-slate-300">X 輸入輪詢 (Auto-Poll):</span>
+                        <button id="autoPollToggleBtn" onclick="toggleAutoPolling()" class="px-2.5 py-1 rounded font-semibold bg-slate-800 text-slate-400 border border-slate-700 hover:text-white transition">
+                            <i class="fa-solid fa-stop mr-1"></i> 未啟動
+                        </button>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <span class="text-slate-400">間隔:</span>
+                        <input type="number" id="pollInterval" value="300" min="100" max="5000" class="w-16 bg-slate-950 border border-slate-700 rounded px-2 py-1 text-center text-slate-200">
+                        <span class="text-slate-400">ms</span>
+                        <button onclick="readXInputsNow()" class="px-2.5 py-1 bg-amber-600/30 hover:bg-amber-600/50 text-amber-300 border border-amber-500/40 rounded transition">
+                            <i class="fa-solid fa-bolt mr-1"></i> 手動讀取 X
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-plc-card border border-plc-border rounded-xl p-4">
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-down-long text-amber-400"></i> X 輸入信號監控 (16通道 八進制)
+                    </h2>
+                    <div class="flex items-center gap-2 text-xs text-slate-400">
+                        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-400"></span> ON</span>
+                        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-slate-700"></span> OFF</span>
+                    </div>
+                </div>
+
+                <!-- 16 Channel X Input Grid -->
+                <div id="xGrid" class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                    <!-- Dynamic Generation via JS -->
+                </div>
+            </div>
+
+            <!-- Batch Control Bar -->
+            <div class="bg-plc-card border border-plc-border rounded-xl p-4 flex flex-wrap justify-between items-center gap-3">
+                <div class="flex items-center gap-2">
+                    <span class="text-xs font-semibold text-slate-300">Y 批次操作:</span>
+                    <button onclick="sendAllOutputs(true)" class="px-3 py-1.5 bg-emerald-600/20 hover:bg-emerald-600/40 text-emerald-400 border border-emerald-600/40 rounded-lg text-xs font-medium transition flex items-center gap-1">
+                        <i class="fa-solid fa-power-off"></i> 全開 (ALL ON)
+                    </button>
+                    <button onclick="sendAllOutputs(false)" class="px-3 py-1.5 bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 border border-rose-600/40 rounded-lg text-xs font-medium transition flex items-center gap-1">
+                        <i class="fa-solid fa-circle-xmark"></i> 全關 (ALL OFF)
+                    </button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <span class="text-xs text-slate-400">間隔:</span>
+                    <input type="number" id="batchInterval" value="100" min="20" max="2000" class="w-16 bg-slate-900 border border-slate-700 rounded px-2 py-1 text-xs text-center text-slate-200">
+                    <span class="text-xs text-slate-400">ms</span>
+                    <button onclick="toggleSequencer()" id="seqBtn" class="px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/40 text-amber-400 border border-amber-600/40 rounded-lg text-xs font-medium transition flex items-center gap-1 ml-2">
+                        <i class="fa-solid fa-play"></i> <span id="seqBtnText">啟動跑馬燈測機</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Y Output Switch Control Cards Grid -->
+            <div class="bg-plc-card border border-plc-border rounded-xl p-4">
+                <div class="flex justify-between items-center mb-4">
+                    <h2 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-toggle-on text-emerald-400"></i> Y 輸出控制單元 (16通道 八進制)
+                    </h2>
+                    <div class="flex items-center gap-2 text-xs text-slate-400">
+                        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-emerald-400"></span> ON</span>
+                        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-slate-600"></span> OFF</span>
+                    </div>
+                </div>
+
+                <!-- 16 Channel Grid Container -->
+                <div id="yGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <!-- Dynamic Generation via JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Column: PLC Visualizer, Log & Frame Tools (5 Cols on LG) -->
+        <div class="lg:col-span-5 flex flex-col gap-6">
+
+            <!-- Hardware Visualizer Panel (FX-3U Style) -->
+            <div class="bg-slate-900 border-2 border-slate-700 rounded-xl p-5 shadow-2xl relative overflow-hidden">
+                <!-- Mitsubishi FX Branding -->
+                <div class="flex justify-between items-start border-b border-slate-800 pb-3 mb-4">
+                    <div>
+                        <div class="text-xs font-black tracking-widest text-slate-400">MITSUBISHI ELECTRIC</div>
+                        <div class="text-lg font-extrabold text-white tracking-wider font-mono">MELSEC FX3U-32MR</div>
+                    </div>
+                    <!-- System Power / Status LEDs -->
+                    <div class="flex gap-3 text-[10px] text-slate-400">
+                        <div class="flex flex-col items-center">
+                            <span class="mb-1">POWER</span>
+                            <span id="plcPowerLed" class="w-3 h-3 rounded-full bg-emerald-500 led-glow-green"></span>
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <span class="mb-1">RUN</span>
+                            <span id="plcRunLed" class="w-3 h-3 rounded-full bg-slate-700"></span>
+                        </div>
+                        <div class="flex flex-col items-center">
+                            <span class="mb-1">ERROR</span>
+                            <span id="plcErrLed" class="w-3 h-3 rounded-full bg-slate-700"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Visual INPUT (X) LED Panel -->
+                <div class="bg-black/60 p-3 rounded-lg border border-slate-800 mb-3">
+                    <div class="text-xs text-amber-400 font-mono mb-2 flex justify-between">
+                        <span>INPUT (X) STATUS</span>
+                        <span class="text-slate-500 text-[10px]">SINK/SOURCE</span>
+                    </div>
+                    <div class="grid grid-cols-8 gap-1.5 text-center">
+                        <div id="visXGroup1" class="col-span-8 grid grid-cols-8 gap-1.5 pb-2 border-b border-slate-800"></div>
+                        <div id="visXGroup2" class="col-span-8 grid grid-cols-8 gap-1.5 pt-1"></div>
+                    </div>
+                </div>
+
+                <!-- Visual OUTPUT (Y) LED Panel -->
+                <div class="bg-black/60 p-3 rounded-lg border border-slate-800 mb-3">
+                    <div class="text-xs text-emerald-400 font-mono mb-2 flex justify-between">
+                        <span>OUTPUT (Y) STATUS</span>
+                        <span class="text-slate-500 text-[10px]">RELAY TYPE</span>
+                    </div>
+                    <div class="grid grid-cols-8 gap-1.5 text-center">
+                        <div id="visYGroup1" class="col-span-8 grid grid-cols-8 gap-1.5 pb-2 border-b border-slate-800"></div>
+                        <div id="visYGroup2" class="col-span-8 grid grid-cols-8 gap-1.5 pt-1"></div>
+                    </div>
+                </div>
+
+                <!-- Terminal Deck Summary -->
+                <div class="bg-slate-800/80 p-2.5 rounded text-[11px] font-mono text-slate-400 flex justify-between items-center border border-slate-700">
+                    <span id="xActiveBadge" class="text-amber-400 font-bold">X Active: 0/16</span>
+                    <span id="yActiveBadge" class="text-emerald-400 font-bold">Y Active: 0/16</span>
+                </div>
+            </div>
+
+            <!-- Custom HEX Frame Inspector & Generator -->
+            <div class="bg-plc-card border border-plc-border rounded-xl p-4">
+                <div class="flex justify-between items-center mb-3">
+                    <h2 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-calculator text-emerald-400"></i> FX 協議 Checksum 計算器
+                    </h2>
+                </div>
+                
+                <div class="space-y-3 text-xs">
+                    <div>
+                        <label class="block text-slate-400 mb-1">指令類型 (Command Type)</label>
+                        <div class="grid grid-cols-3 gap-1.5">
+                            <button onclick="setCalcCmd('READ')" id="calcReadBtn" class="py-1 rounded bg-amber-600/30 text-amber-300 border border-amber-500/50 font-semibold">
+                                Read (0x30 / '0')
+                            </button>
+                            <button onclick="setCalcCmd('SET')" id="calcSetBtn" class="py-1 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                                Force ON (0x37 / '7')
+                            </button>
+                            <button onclick="setCalcCmd('RESET')" id="calcRstBtn" class="py-1 rounded bg-slate-800 text-slate-400 border border-slate-700">
+                                Force OFF (0x38 / '8')
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-slate-400 mb-1">位址/長度 Payload (ASCII)</label>
+                            <input type="text" id="calcAddr" value="008002" placeholder="008002" class="w-full bg-slate-900 border border-slate-700 rounded p-1.5 text-slate-200 font-mono focus:border-emerald-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="block text-slate-400 mb-1">計算 Checksum (Hex)</label>
+                            <input type="text" id="calcCsum" value="5D" readonly class="w-full bg-slate-900 border border-slate-800 rounded p-1.5 text-emerald-400 font-mono font-bold">
+                        </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-slate-400 mb-1">完整 Hex 數據幀 (Byte Stream)</label>
+                        <div class="flex gap-2">
+                            <input type="text" id="manualHexInput" value="02 30 30 30 38 30 30 32 03 35 44" class="flex-1 bg-slate-900 border border-slate-700 rounded p-2 text-emerald-300 font-mono text-xs focus:border-emerald-500 outline-none">
+                            <button onclick="sendManualHex()" class="px-3 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded transition">
+                                發送
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Communication Log Console -->
+            <div class="bg-plc-card border border-plc-border rounded-xl p-4 flex flex-col flex-1 min-h-[260px]">
+                <div class="flex justify-between items-center mb-2 pb-2 border-b border-slate-800">
+                    <h2 class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                        <i class="fa-solid fa-terminal text-emerald-400"></i> 通訊日誌控制台 (TX / RX Log)
+                    </h2>
+                    <div class="flex items-center gap-2">
+                        <button onclick="clearLog()" class="text-xs text-slate-400 hover:text-slate-200 transition">
+                            <i class="fa-solid fa-trash-can mr-1"></i>清除
+                        </button>
+                    </div>
+                </div>
+
+                <div id="logConsole" class="flex-1 bg-slate-950 rounded-lg p-2.5 font-mono text-[11px] leading-relaxed text-slate-300 overflow-y-auto max-h-[240px] custom-scrollbar space-y-1">
+                    <div class="text-slate-500">// 系統就緒，請連接 Serial/WebSocket 或使用模擬模式...</div>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-plc-card border-t border-plc-border mt-auto py-3 px-4 text-center text-xs text-slate-500">
+        Mitsubishi FX PLC Protocol Workstation &copy; 2026 | Web Serial API & WebSocket Enabled
+    </footer>
+
+    <script>
+        const READ_X_CMD = "02 30 30 30 38 30 30 32 03 35 44";
+        const X_KEYS = ['X0', 'X1', 'X2', 'X3', 'X4', 'X5', 'X6', 'X7', 'X10', 'X11', 'X12', 'X13', 'X14', 'X15', 'X16', 'X17'];
+        const Y_KEYS = ['Y0', 'Y1', 'Y2', 'Y3', 'Y4', 'Y5', 'Y6', 'Y7', 'Y10', 'Y11', 'Y12', 'Y13', 'Y14', 'Y15', 'Y16', 'Y17'];
+        const Y_COMMANDS = {
+            Y0:  { on: '02 37 30 30 30 35 03 46 46', off: '02 38 30 30 30 35 03 30 30' },
+            Y1:  { on: '02 37 30 31 30 35 03 30 30', off: '02 38 30 31 30 35 03 30 31' },
+            Y2:  { on: '02 37 30 32 30 35 03 30 31', off: '02 38 30 32 30 35 03 30 32' },
+            Y3:  { on: '02 37 30 33 30 35 03 30 32', off: '02 38 30 33 30 35 03 30 33' },
+            Y4:  { on: '02 37 30 34 30 35 03 30 33', off: '02 38 30 34 30 35 03 30 34' },
+            Y5:  { on: '02 37 30 35 30 35 03 30 34', off: '02 38 30 35 30 35 03 30 35' },
+            Y6:  { on: '02 37 30 36 30 35 03 30 35', off: '02 38 30 36 30 35 03 30 36' },
+            Y7:  { on: '02 37 30 37 30 35 03 30 36', off: '02 38 30 37 30 35 03 30 37' },
+            Y10: { on: '02 37 30 38 30 35 03 30 37', off: '02 38 30 38 30 35 03 30 38' },
+            Y11: { on: '02 37 30 39 30 35 03 30 38', off: '02 38 30 39 30 35 03 30 39' },
+            Y12: { on: '02 37 30 41 30 35 03 31 30', off: '02 38 30 41 30 35 03 31 31' },
+            Y13: { on: '02 37 30 42 30 35 03 31 31', off: '02 38 30 42 30 35 03 31 32' },
+            Y14: { on: '02 37 30 43 30 35 03 31 32', off: '02 38 30 43 30 35 03 31 33' },
+            Y15: { on: '02 37 30 44 30 35 03 31 33', off: '02 38 30 44 30 35 03 31 34' },
+            Y16: { on: '02 37 30 45 30 35 03 31 34', off: '02 38 30 45 30 35 03 31 35' },
+            Y17: { on: '02 37 30 46 30 35 03 31 35', off: '02 38 30 46 30 35 03 31 36' }
+        };
+
+        // State Variables
+        let connMode = 'serial';
+        let isConnected = false;
+        let serialPort = null;
+        let serialWriter = null;
+        let serialReader = null;
+        let readerPromise = null;
+        let keepReading = false;
+        let socket = null;
+
+        let yStates = {};
+        let xStates = {};
+        let xAliases = {};
+        let yAliases = {};
+
+        let isAutoPolling = false;
+        let pollingTimer = null;
+        let isSequencerRunning = false;
+        let sequencerInterval = null;
+        let currentCalcType = 'READ';
+
+        window.onload = function() {
+            loadSavedAliases();
+            initStates();
+            renderXGrid();
+            renderYGrid();
+            renderVisualizerLeds();
+            updateCalcChecksum();
+
+            if ("serial" in navigator) {
+                navigator.serial.addEventListener('disconnect', (e) => {
+                    logConsole("[Web Serial] 偵測到 Serial 裝置已實體拔除或離線", "warn");
+                    disconnect();
+                });
+            } else {
+                logConsole("提示: 當前瀏覽器未支援原生 Web Serial，請使用 Chrome/Edge，或切換至 WebSocket/模擬模式。", "warn");
+            }
+        };
+
+        function initStates() {
+            Y_KEYS.forEach(k => yStates[k] = false);
+            X_KEYS.forEach(k => xStates[k] = false);
+        }
+
+        function loadSavedAliases() {
+            try {
+                const savedY = localStorage.getItem('plc_y_aliases');
+                if (savedY) yAliases = JSON.parse(savedY);
+                const savedX = localStorage.getItem('plc_x_aliases');
+                if (savedX) xAliases = JSON.parse(savedX);
+            } catch (e) {}
+        }
+
+        function saveAlias(type, key, val) {
+            if (type === 'Y') {
+                yAliases[key] = val;
+                localStorage.setItem('plc_y_aliases', JSON.stringify(yAliases));
+            } else {
+                xAliases[key] = val;
+                localStorage.setItem('plc_x_aliases', JSON.stringify(xAliases));
+            }
+        }
+
+        function renderXGrid() {
+            const grid = document.getElementById('xGrid');
+            grid.innerHTML = '';
+
+            X_KEYS.forEach(key => {
+                const isAck = xStates[key];
+                const alias = xAliases[key] || `點位 ${key}`;
+
+                const card = document.createElement('div');
+                card.className = `p-2.5 rounded-lg border transition-all duration-200 cursor-pointer ${
+                    isAck ? 'bg-amber-950/40 border-amber-500/60 shadow-md shadow-amber-950/30' : 'bg-slate-900/80 border-slate-800'
+                }`;
+
+                // In Simulation mode, clicking allows toggling X inputs for testing
+                card.onclick = (e) => {
+                    if (e.target.tagName === 'INPUT') return; // Don't trigger when editing name
+                    if (connMode === 'sim') {
+                        xStates[key] = !xStates[key];
+                        updateXUI();
+                    }
+                };
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-center mb-1">
+                        <div class="flex items-center gap-2">
+                            <span class="w-3 h-3 rounded-full transition-all ${
+                                isAck ? 'bg-amber-400 led-glow-amber' : 'bg-slate-700'
+                            }"></span>
+                            <span class="font-mono font-bold text-xs text-white">${key}</span>
+                        </div>
+                        <span class="text-[10px] font-semibold px-1.5 py-0.2 rounded ${
+                            isAck ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'bg-slate-800 text-slate-500'
+                        }">${isAck ? 'ON' : 'OFF'}</span>
+                    </div>
+                    <input type="text" value="${alias}" onchange="saveAlias('X', '${key}', this.value)" 
+                           placeholder="自訂別名" 
+                           class="text-[11px] bg-transparent border-b border-transparent hover:border-slate-700 focus:border-amber-500 text-slate-300 w-full outline-none truncate">
+                `;
+
+                grid.appendChild(card);
+            });
+        }
+
+        function renderYGrid() {
+            const grid = document.getElementById('yGrid');
+            grid.innerHTML = '';
+
+            Y_KEYS.forEach(key => {
+                const isAck = yStates[key];
+                const alias = yAliases[key] || `控制設備 ${key}`;
+                const cmdObj = Y_COMMANDS[key];
+
+                const card = document.createElement('div');
+                card.className = `p-3 rounded-lg border transition-all duration-200 ${
+                    isAck ? 'bg-emerald-950/30 border-emerald-500/50 shadow-md shadow-emerald-950/20' : 'bg-slate-900/80 border-slate-800'
+                }`;
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-2">
+                        <div class="flex items-center gap-2">
+                            <span class="w-3 h-3 rounded-full transition-all ${
+                                isAck ? 'bg-emerald-400 led-glow-green' : 'bg-slate-700'
+                            }"></span>
+                            <span class="font-mono font-bold text-sm text-white">${key}</span>
+                        </div>
+                        <input type="text" value="${alias}" onchange="saveAlias('Y', '${key}', this.value)" 
+                               placeholder="自訂別名" 
+                               class="text-xs bg-transparent border-b border-transparent hover:border-slate-700 focus:border-emerald-500 text-slate-300 px-1 text-right outline-none w-28 truncate">
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 my-2">
+                        <button onclick="toggleYOutput('${key}')" class="py-1.5 px-2 rounded text-xs font-semibold flex items-center justify-center gap-1.5 transition-all ${
+                            isAck 
+                            ? 'bg-rose-600/30 text-rose-300 border border-rose-500/50 hover:bg-rose-600/50' 
+                            : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow'
+                        }">
+                            <i class="fa-solid ${isAck ? 'fa-power-off' : 'fa-bolt'}"></i>
+                            ${isAck ? '關閉 (OFF)' : '啟動 (ON)'}
+                        </button>
+
+                        <button onmousedown="momentaryY('${key}', true)" onmouseup="momentaryY('${key}', false)" onmouseleave="momentaryY('${key}', false)"
+                                ontouchstart="momentaryY('${key}', true)" ontouchend="momentaryY('${key}', false)"
+                                class="py-1.5 px-2 bg-slate-800 hover:bg-slate-700 active:bg-amber-600 active:text-white text-slate-300 border border-slate-700 rounded text-xs font-medium transition select-none flex items-center justify-center gap-1">
+                            <i class="fa-solid fa-hand-pointer"></i> 點動 (Push)
+                        </button>
+                    </div>
+
+                    <div class="mt-2 text-[10px] font-mono bg-black/50 p-1.5 rounded border border-slate-800 flex justify-between text-slate-400">
+                        <span class="truncate">ON: <span class="text-emerald-400">${cmdObj.on}</span></span>
+                        <button onclick="copyToClipboard('${cmdObj.on}')" title="複製 Hex" class="hover:text-slate-200 ml-1">
+                            <i class="fa-regular fa-copy"></i>
+                        </button>
+                    </div>
+                `;
+
+                grid.appendChild(card);
+            });
+        }
+
+        function renderVisualizerLeds() {
+            const xG1 = document.getElementById('visXGroup1');
+            const xG2 = document.getElementById('visXGroup2');
+            const yG1 = document.getElementById('visYGroup1');
+            const yG2 = document.getElementById('visYGroup2');
+
+            xG1.innerHTML = ''; xG2.innerHTML = '';
+            yG1.innerHTML = ''; yG2.innerHTML = '';
+
+            X_KEYS.slice(0, 8).forEach(k => xG1.appendChild(createLedChip('X', k)));
+            X_KEYS.slice(8, 16).forEach(k => xG2.appendChild(createLedChip('X', k)));
+
+            Y_KEYS.slice(0, 8).forEach(k => yG1.appendChild(createLedChip('Y', k)));
+            Y_KEYS.slice(8, 16).forEach(k => yG2.appendChild(createLedChip('Y', k)));
+
+            updateActiveCount();
+        }
+
+        function createLedChip(type, key) {
+            const isAck = type === 'X' ? xStates[key] : yStates[key];
+            const activeColor = type === 'X' ? 'bg-amber-400 led-glow-amber' : 'bg-emerald-400 led-glow-green';
+            
+            const div = document.createElement('div');
+            div.className = 'flex flex-col items-center';
+            div.innerHTML = `
+                <span class="text-[9px] text-slate-400 font-mono mb-0.5">${key}</span>
+                <span id="vis-led-${key}" class="w-3.5 h-3.5 rounded-full border border-slate-900 transition-all ${
+                    isAck ? activeColor : 'bg-slate-800'
+                }"></span>
+            `;
+            return div;
+        }
+
+        function updateActiveCount() {
+            const activeX = Object.values(xStates).filter(Boolean).length;
+            const activeY = Object.values(yStates).filter(Boolean).length;
+
+            document.getElementById('xActiveBadge').innerText = `X Active: ${activeX}/16`;
+            document.getElementById('yActiveBadge').innerText = `Y Active: ${activeY}/16`;
+
+            const runLed = document.getElementById('plcRunLed');
+            if (activeX > 0 || activeY > 0 || isConnected) {
+                runLed.className = "w-3 h-3 rounded-full bg-emerald-500 led-glow-green";
+            } else {
+                runLed.className = "w-3 h-3 rounded-full bg-slate-700";
+            }
+        }
+
+        function updateXUI() {
+            renderXGrid();
+            X_KEYS.forEach(key => {
+                const visLed = document.getElementById(`vis-led-${key}`);
+                if (visLed) {
+                    visLed.className = `w-3.5 h-3.5 rounded-full border border-slate-900 transition-all ${
+                        xStates[key] ? 'bg-amber-400 led-glow-amber' : 'bg-slate-800'
+                    }`;
+                }
+            });
+            updateActiveCount();
+        }
+
+        function switchConnMode(mode) {
+            if (isConnected) {
+                logConsole("請先斷開連線再變更模式", "warn");
+                return;
+            }
+
+            connMode = mode;
+            const btnSerial = document.getElementById('modeSerialBtn');
+            const btnWs = document.getElementById('modeWsBtn');
+            const btnSim = document.getElementById('modeSimBtn');
+            const serialCfg = document.getElementById('serialConfigGroup');
+            const wsCfg = document.getElementById('wsConfigGroup');
+            const desc = document.getElementById('connModeDesc');
+            const connectBtnText = document.getElementById('connectBtnText');
+
+            [btnSerial, btnWs, btnSim].forEach(b => {
+                b.className = "px-3 py-1.5 rounded-md font-medium transition-all text-slate-400 hover:text-slate-200";
+            });
+
+            if (mode === 'serial') {
+                btnSerial.className = "px-3 py-1.5 rounded-md font-medium transition-all bg-emerald-600 text-white shadow";
+                serialCfg.classList.remove('hidden'); serialCfg.classList.add('grid');
+                wsCfg.classList.add('hidden'); wsCfg.classList.remove('grid');
+                desc.innerText = "Mode: Web Serial (Direct COM Port)";
+                connectBtnText.innerText = "連接 Serial 通訊埠";
+            } else if (mode === 'websocket') {
+                btnWs.className = "px-3 py-1.5 rounded-md font-medium transition-all bg-emerald-600 text-white shadow";
+                wsCfg.classList.remove('hidden'); wsCfg.classList.add('grid');
+                serialCfg.classList.add('hidden'); serialCfg.classList.remove('grid');
+                desc.innerText = "Mode: WebSocket Client Bridge";
+                connectBtnText.innerText = "連接 WebSocket 伺服器";
+            } else if (mode === 'sim') {
+                btnSim.className = "px-3 py-1.5 rounded-md font-medium transition-all bg-amber-600 text-white shadow";
+                serialCfg.classList.add('hidden'); wsCfg.classList.add('hidden');
+                desc.innerText = "Mode: Virtual PLC Simulator (可點擊 X 卡片測試)";
+                connectBtnText.innerText = "啟動虛擬 PLC 模擬器";
+            }
+        }
+
+        async function toggleConnection() {
+            if (isConnected) {
+                await disconnect();
+            } else {
+                await connect();
+            }
+        }
+
+        async function connect() {
+            if (connMode === 'serial') {
+                if (!("serial" in navigator)) {
+                    alert("瀏覽器不支援 Web Serial API，請用 Chrome/Edge。");
+                    return;
+                }
+                try {
+                    // 若之前有遺留連接，先確保徹底釋放
+                    if (serialPort && serialPort.readable) {
+                        await disconnect();
+                    }
+
+                    if (!serialPort) {
+                        serialPort = await navigator.serial.requestPort();
+                    }
+
+                    const baudRate = parseInt(document.getElementById('baudRate').value);
+                    const dataBits = parseInt(document.getElementById('dataBits').value);
+                    const parity = document.getElementById('parity').value;
+                    const stopBits = parseInt(document.getElementById('stopBits').value);
+
+                    logConsole("[Web Serial] 正在開啟 Serial 埠...", "sys");
+                    await serialPort.open({ baudRate, dataBits, parity, stopBits });
+                    
+                    keepReading = true;
+                    isConnected = true;
+                    updateConnUI(true, "COM Port 已連線");
+                    logConsole(`[Web Serial] 已成功開啟串口 (${baudRate},${dataBits},${parity.toUpperCase()},${stopBits})`, "sys");
+
+                    readerPromise = readSerialLoop();
+                } catch (err) {
+                    logConsole(`[Web Serial 連接失敗] ${err.message}`, "err");
+                    serialPort = null;
+                    isConnected = false;
+                    updateConnUI(false, "未連接");
+                }
+            } else if (connMode === 'websocket') {
+                const url = document.getElementById('wsUrl').value.trim();
+                try {
+                    socket = new WebSocket(url);
+                    socket.onopen = () => {
+                        isConnected = true;
+                        updateConnUI(true, "WebSocket 已連線");
+                        logConsole(`[WebSocket] 已連接至 ${url}`, "sys");
+                    };
+                    socket.onmessage = (evt) => {
+                        handleIncomingHexData(evt.data);
+                    };
+                    socket.onerror = () => logConsole(`[WebSocket Error] 無法連線`, "err");
+                    socket.onclose = () => disconnect();
+                } catch (e) {
+                    logConsole(`[WebSocket Exception] ${e.message}`, "err");
+                }
+            } else if (connMode === 'sim') {
+                isConnected = true;
+                updateConnUI(true, "模擬器運行中");
+                logConsole("[模擬模式] 虛擬 FX3UPLC 工作站已啟動 (點擊 X 卡片可模擬輸入)", "sys");
+            }
+        }
+
+        async function disconnect() {
+            if (isAutoPolling) toggleAutoPolling();
+            if (isSequencerRunning) toggleSequencer();
+
+            keepReading = false;
+            isConnected = false;
+
+            if (serialPort) {
+                logConsole("[Web Serial] 正在釋放與關閉 Serial 通訊埠...", "sys");
+                try {
+                    if (serialReader) {
+                        await serialReader.cancel();
+                    }
+                    if (readerPromise) {
+                        await readerPromise;
+                    }
+                    await serialPort.close();
+                    logConsole("[Web Serial] Serial 通訊埠已成功關閉與釋放，可隨時重新連接", "sys");
+                } catch (e) {
+                    logConsole(`[Web Serial 關閉提示] ${e.message}`, "warn");
+                }
+                serialPort = null;
+                serialReader = null;
+                readerPromise = null;
+            }
+
+            if (socket) {
+                socket.close();
+                socket = null;
+            }
+
+            updateConnUI(false, "未連接");
+        }
+
+        async function reselectSerialPort() {
+            if (isConnected) {
+                await disconnect();
+            }
+            serialPort = null;
+            logConsole("[Web Serial] 已重置 Port 紀錄，請點擊「連接 Serial 通訊埠」選擇裝置", "sys");
+            if (connMode === 'serial') {
+                connect();
+            }
+        }
+
+        async function readSerialLoop() {
+            while (serialPort && serialPort.readable && keepReading) {
+                try {
+                    serialReader = serialPort.readable.getReader();
+                    while (keepReading) {
+                        const { value, done } = await serialReader.read();
+                        if (done) {
+                            break;
+                        }
+                        if (value) {
+                            const hexStr = Array.from(value).map(b => b.toString(16).padStart(2, '0').toUpperCase()).join(' ');
+                            handleIncomingHexData(hexStr);
+                        }
+                    }
+                } catch (err) {
+                    if (keepReading) {
+                        logConsole(`[Read Error] ${err.message}`, "err");
+                    }
+                } finally {
+                    if (serialReader) {
+                        try {
+                            serialReader.releaseLock();
+                        } catch (e) {}
+                        serialReader = null;
+                    }
+                }
+            }
+        }
+
+        function handleIncomingHexData(hexStr) {
+            logConsole(`[RX Hex] ${hexStr}`, "rx");
+
+            // Parse response for X Input Read Command
+            // Response format for 2 bytes read: STX (02) + 4 Hex ASCII chars (2 bytes) + ETX (03) + Checksum
+            // Example: 02 30 30 30 30 03 36 30 -> Payload "0000" (Low Byte X0~X7, High Byte X10~X17)
+            const clean = hexStr.replace(/\s+/g, '');
+            if (clean.startsWith('02') && clean.length >= 12) {
+                try {
+                    // Extract data ASCII chars (e.g. '0','0','0','0')
+                    const dataHexBytes = clean.substring(2, clean.length - 6); 
+                    let asciiData = "";
+                    for (let i = 0; i < dataHexBytes.length; i += 2) {
+                        asciiData += String.fromCharCode(parseInt(dataHexBytes.substr(i, 2), 16));
+                    }
+
+                    if (asciiData.length >= 4) {
+                        // Low Byte (X0~X7) & High Byte (X10~X17)
+                        const lowByteVal = parseInt(asciiData.substr(0, 2), 16) || 0;
+                        const highByteVal = parseInt(asciiData.substr(2, 2), 16) || 0;
+
+                        for (let i = 0; i < 8; i++) {
+                            xStates[`X${i}`] = !!(lowByteVal & (1 << i));
+                        }
+                        for (let i = 0; i < 8; i++) {
+                            const key = X_KEYS[8 + i]; // X10~X17
+                            xStates[key] = !!(highByteVal & (1 << i));
+                        }
+
+                        updateXUI();
+                    }
+                } catch (e) {
+                    // Raw string parse fallback
+                }
+            }
+        }
+
+        function updateConnUI(connected, text) {
+            const btn = document.getElementById('connectBtn');
+            const btnText = document.getElementById('connectBtnText');
+            const led = document.getElementById('statusLed');
+            const statusText = document.getElementById('statusText');
+
+            if (connected) {
+                btn.className = "px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white font-semibold rounded-lg shadow-md transition-all flex items-center gap-2 text-sm";
+                btnText.innerText = "斷開通訊連接";
+                led.className = "w-2.5 h-2.5 rounded-full bg-emerald-400 led-glow-green";
+                statusText.innerText = text;
+                statusText.className = "text-emerald-400 font-medium";
+            } else {
+                btn.className = "px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-semibold rounded-lg shadow-md transition-all flex items-center gap-2 text-sm";
+                btnText.innerText = connMode === 'serial' ? "連接 Serial 通訊埠" : (connMode === 'websocket' ? "連接 WebSocket" : "啟動虛擬 PLC");
+                led.className = "w-2.5 h-2.5 rounded-full bg-slate-500";
+                statusText.innerText = text;
+                statusText.className = "text-slate-400";
+            }
+        }
+
+        async function sendHexCommand(hexStr, targetYKey = null, targetYState = null) {
+            if (!isConnected && connMode !== 'sim') {
+                logConsole(`[警告] 未連線，無法傳送: ${hexStr}`, "warn");
+                return;
+            }
+
+            const cleanHex = hexStr.replace(/\s+/g, '');
+            const bytes = new Uint8Array(cleanHex.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+
+            logConsole(`[TX Hex] ${hexStr}`, "tx");
+
+            if (connMode === 'serial' && serialPort && serialPort.writable) {
+                let writer = null;
+                try {
+                    writer = serialPort.writable.getWriter();
+                    await writer.write(bytes);
+                } catch (e) {
+                    logConsole(`[TX Error] ${e.message}`, "err");
+                } finally {
+                    if (writer) {
+                        try {
+                            writer.releaseLock();
+                        } catch (e) {}
+                    }
+                }
+            } else if (connMode === 'websocket' && socket) {
+                socket.send(hexStr);
+            } else if (connMode === 'sim') {
+                // Simulation behavior
+                if (hexStr === READ_X_CMD) {
+                    // Generate random or current simulation payload for X
+                    let lowVal = 0, highVal = 0;
+                    for (let i = 0; i < 8; i++) { if (xStates[`X${i}`]) lowVal |= (1 << i); }
+                    for (let i = 0; i < 8; i++) { if (xStates[X_KEYS[8+i]]) highVal |= (1 << i); }
+
+                    const hexLow = lowVal.toString(16).padStart(2, '0').toUpperCase();
+                    const hexHigh = highVal.toString(16).padStart(2, '0').toUpperCase();
+                    const payloadHexStr = `02 3${hexLow[0]} 3${hexLow[1]} 3${hexHigh[0]} 3${hexHigh[1]} 03 36 30`;
+
+                    setTimeout(() => handleIncomingHexData(payloadHexStr), 30);
+                } else {
+                    setTimeout(() => logConsole(`[RX Hex] 06 (ACK)`, "rx"), 30);
+                }
+            }
+
+            if (targetYKey !== null && targetYState !== null) {
+                yStates[targetYKey] = targetYState;
+                renderYGrid();
+                const visLed = document.getElementById(`vis-led-${targetYKey}`);
+                if (visLed) {
+                    visLed.className = `w-3.5 h-3.5 rounded-full border border-slate-900 transition-all ${
+                        targetYState ? 'bg-emerald-400 led-glow-green' : 'bg-slate-800'
+                    }`;
+                }
+                updateActiveCount();
+            }
+        }
+
+        // Auto Polling X Loop
+        function toggleAutoPolling() {
+            const btn = document.getElementById('autoPollToggleBtn');
+            if (isAutoPolling) {
+                clearInterval(pollingTimer);
+                isAutoPolling = false;
+                btn.className = "px-2.5 py-1 rounded font-semibold bg-slate-800 text-slate-400 border border-slate-700 hover:text-white transition";
+                btn.innerHTML = `<i class="fa-solid fa-stop mr-1"></i> 未啟動`;
+                logConsole("[Auto-Poll] 已停止 X 輸入輪詢", "sys");
+            } else {
+                isAutoPolling = true;
+                const interval = parseInt(document.getElementById('pollInterval').value) || 300;
+                btn.className = "px-2.5 py-1 rounded font-semibold bg-emerald-600/30 text-emerald-300 border border-emerald-500/50 hover:bg-emerald-600/50 transition";
+                btn.innerHTML = `<i class="fa-solid fa-sync fa-spin mr-1"></i> 輪詢中 (${interval}ms)`;
+                logConsole(`[Auto-Poll] 已啟動 X 輸入輪詢 (${interval}ms)`, "sys");
+
+                readXInputsNow();
+                pollingTimer = setInterval(() => {
+                    readXInputsNow();
+                }, interval);
+            }
+        }
+
+        function readXInputsNow() {
+            sendHexCommand(READ_X_CMD);
+        }
+
+        function toggleYOutput(key) {
+            const nextState = !yStates[key];
+            const hexCmd = nextState ? Y_COMMANDS[key].on : Y_COMMANDS[key].off;
+            sendHexCommand(hexCmd, key, nextState);
+        }
+
+        function momentaryY(key, state) {
+            const hexCmd = state ? Y_COMMANDS[key].on : Y_COMMANDS[key].off;
+            sendHexCommand(hexCmd, key, state);
+        }
+
+        async function sendAllOutputs(turnOn) {
+            const interval = parseInt(document.getElementById('batchInterval').value) || 100;
+            for (let key of Y_KEYS) {
+                const hexCmd = turnOn ? Y_COMMANDS[key].on : Y_COMMANDS[key].off;
+                sendHexCommand(hexCmd, key, turnOn);
+                await delay(interval);
+            }
+        }
+
+        function toggleSequencer() {
+            const btn = document.getElementById('seqBtn');
+            const btnText = document.getElementById('seqBtnText');
+
+            if (isSequencerRunning) {
+                clearInterval(sequencerInterval);
+                isSequencerRunning = false;
+                btn.className = "px-3 py-1.5 bg-amber-600/20 hover:bg-amber-600/40 text-amber-400 border border-amber-600/40 rounded-lg text-xs font-medium transition flex items-center gap-1 ml-2";
+                btnText.innerText = "啟動跑馬燈測機";
+                sendAllOutputs(false);
+            } else {
+                isSequencerRunning = true;
+                btn.className = "px-3 py-1.5 bg-rose-600/20 hover:bg-rose-600/40 text-rose-400 border border-rose-600/40 rounded-lg text-xs font-medium transition flex items-center gap-1 ml-2";
+                btnText.innerText = "停止測機";
+
+                let step = 0;
+                const interval = parseInt(document.getElementById('batchInterval').value) || 150;
+
+                sequencerInterval = setInterval(() => {
+                    const currentKey = Y_KEYS[step % Y_KEYS.length];
+                    const prevKey = Y_KEYS[(step - 1 + Y_KEYS.length) % Y_KEYS.length];
+
+                    sendHexCommand(Y_COMMANDS[prevKey].off, prevKey, false);
+                    sendHexCommand(Y_COMMANDS[currentKey].on, currentKey, true);
+
+                    step++;
+                }, interval);
+            }
+        }
+
+        function setCalcCmd(type) {
+            currentCalcType = type;
+            const rBtn = document.getElementById('calcReadBtn');
+            const setBtn = document.getElementById('calcSetBtn');
+            const rstBtn = document.getElementById('calcRstBtn');
+            const addrInput = document.getElementById('calcAddr');
+
+            [rBtn, setBtn, rstBtn].forEach(b => b.className = "py-1 rounded bg-slate-800 text-slate-400 border border-slate-700");
+
+            if (type === 'READ') {
+                rBtn.className = "py-1 rounded bg-amber-600/30 text-amber-300 border border-amber-500/50 font-semibold";
+                addrInput.value = "008002";
+            } else if (type === 'SET') {
+                setBtn.className = "py-1 rounded bg-emerald-600/30 text-emerald-300 border border-emerald-500/50 font-semibold";
+                addrInput.value = "0005";
+            } else {
+                rstBtn.className = "py-1 rounded bg-rose-600/30 text-rose-300 border border-rose-500/50 font-semibold";
+                addrInput.value = "0005";
+            }
+            updateCalcChecksum();
+        }
+
+        function updateCalcChecksum() {
+            const addrInput = document.getElementById('calcAddr').value.trim() || "0005";
+            let cmdChar = '0';
+            if (currentCalcType === 'SET') cmdChar = '7';
+            if (currentCalcType === 'RESET') cmdChar = '8';
+
+            const payloadStr = cmdChar + addrInput; 
+
+            let sum = 0;
+            for (let i = 0; i < payloadStr.length; i++) {
+                sum += payloadStr.charCodeAt(i);
+            }
+            sum += 0x03; // ETX byte
+
+            const csumHex = (sum & 0xFF).toString(16).toUpperCase().padStart(2, '0');
+            document.getElementById('calcCsum').value = csumHex;
+
+            let hexBytes = ["02"]; // STX
+            for (let i = 0; i < payloadStr.length; i++) {
+                hexBytes.push(payloadStr.charCodeAt(i).toString(16).toUpperCase().padStart(2, '0'));
+            }
+            hexBytes.push("03"); // ETX
+            hexBytes.push(csumHex.charCodeAt(0).toString(16).toUpperCase());
+            hexBytes.push(csumHex.charCodeAt(1).toString(16).toUpperCase());
+
+            document.getElementById('manualHexInput').value = hexBytes.join(' ');
+        }
+
+        document.getElementById('calcAddr').addEventListener('input', updateCalcChecksum);
+
+        function sendManualHex() {
+            const hex = document.getElementById('manualHexInput').value.trim();
+            if (hex) sendHexCommand(hex);
+        }
+
+        function logConsole(msg, type = "info") {
+            const consoleBox = document.getElementById('logConsole');
+            const timestamp = new Date().toLocaleTimeString('zh-TW', { hour12: false }) + '.' + String(new Date().getMilliseconds()).padStart(3, '0');
+
+            let colorClass = "text-slate-300";
+            if (type === "tx") colorClass = "text-emerald-400 font-semibold";
+            if (type === "rx") colorClass = "text-cyan-400 font-semibold";
+            if (type === "err") colorClass = "text-rose-400 font-bold";
+            if (type === "warn") colorClass = "text-amber-400";
+            if (type === "sys") colorClass = "text-slate-500 italic";
+
+            const logLine = document.createElement('div');
+            logLine.className = colorClass;
+            logLine.innerText = `[${timestamp}] ${msg}`;
+
+            consoleBox.appendChild(logLine);
+            consoleBox.scrollTop = consoleBox.scrollHeight;
+        }
+
+        function clearLog() {
+            document.getElementById('logConsole').innerHTML = '<div class="text-slate-500">// 控制台已清除...</div>';
+        }
+
+        function copyToClipboard(text) {
+            const tempInput = document.createElement("input");
+            tempInput.value = text;
+            document.body.appendChild(tempInput);
+            tempInput.select();
+            document.execCommand("copy");
+            document.body.removeChild(tempInput);
+            logConsole(`已複製指令: ${text}`, "sys");
+        }
+
+        function delay(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+    </script>
+</body>
+</html>
